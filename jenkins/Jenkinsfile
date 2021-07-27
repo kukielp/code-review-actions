@@ -1,0 +1,70 @@
+pipeline {
+    agent any
+    
+    options {
+        ansiColor('xterm')
+    }
+    
+    tools {
+        maven "M3"
+    }
+    
+    environment {
+        AWS_ACCESS_KEY_ID     = credentials('jenkins-aws-secret-key-id')
+        AWS_SECRET_ACCESS_KEY = credentials('jenkins-aws-secret-access-key')
+        AWS_DEFAULT_REGION = 'us-west-2'
+        name="${env.JOB_NAME.replaceAll("\\s","-")}"
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                deleteDir()
+                git branch: 'master', url: 'https://github.com/nvaidya1/amazon-codeguru-reviewer-sample-app.git'           
+                sh 'mvn -B clean package --file pom.xml'
+                sh 'git log -n 1 --pretty=format:%H > commit_hash'
+                stash 'Stash Files'
+            }
+
+            post {
+                success {
+                    archiveArtifacts 'target/*.jar'
+                }
+            }
+        }
+        stage('AWS Codeguru Reviewer') {
+            agent {
+                docker { 
+                    image 'amazon/aws-cli:latest'
+                    args '-u root --entrypoint='
+                }
+            }
+            steps {
+                sh 'echo "Executing commands on docker..."'
+                sh 'id; pwd'
+                deleteDir()
+                sh 'yum install -y jq zip git'
+                sshagent(['private-repo-ssh-key']) {
+                    sh 'mkdir -p ~/.ssh'
+                    sh 'chmod 700 ~/.ssh' 
+                    sh 'ssh-keyscan github.com >> ~/.ssh/known_hosts'
+                    sh 'chmod 644 ~/.ssh/known_hosts'
+                    sh 'git clone git@github.com:aws-actions/codeguru-reviewer.git'    
+                }
+                unstash 'Stash Files'
+                sh '(export sha=$(cat commit_hash); codeguru-reviewer/entrypoint.sh)'
+            }
+            
+            post {
+                success {
+                    recordIssues(tool: issues(name: 'AWS Codeguru Reviewer', pattern: 'codeguru-results.jenkins-json.log'))
+                }
+            }
+        }
+        stage('Cleanup') {
+            steps {
+                sh 'sudo chown -R jenkins:jenkins /var/jenkins_home/jobs/CodeGuru-Pipeline/workspace@2/codeguru-reviewer/'
+            }
+        }
+    }
+}
