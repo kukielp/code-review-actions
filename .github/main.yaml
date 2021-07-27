@@ -20,7 +20,7 @@ jobs:
             aws-region: ap-southeast-2  # Region to access CodeGuru 
 
         # Step 2: Add CodeGuru Reviewer Action
-        - name: AWS CodeGuru Reviewer Scanner
+        - name: CodeGuru Reviewer
           uses: aws-actions/codeguru-reviewer@v1
           with:
             build_path: target # build artifact(s) directory
